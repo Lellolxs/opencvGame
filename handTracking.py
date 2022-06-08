@@ -1,157 +1,42 @@
-#9cap
-import cv2
-import numpy as np
-import math
-cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-cap.set(cv2.CAP_PROP_FPS, 30)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-# cap.set(cv2.CAP_PROP_AUTO_WB, False)
-# cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, False)
+import cv2 as cv
+import mediapipe as mp
 
-while(1):
-    ret, frame = cap.read()
-    try:  #an error comes if it does not find anything in window as it cannot find contour of max area
-          #therefore this try error statement
+cap = cv.VideoCapture(0, cv.CAP_DSHOW)
+cap.set(cv.CAP_PROP_FPS, 30)
 
-        frame=cv2.flip(frame,1)
-        kernel = np.ones((3,3),np.uint8)
+mp_Hands = mp.solutions.hands
+hands = mp_Hands.Hands()
+mpDraw = mp.solutions.drawing_utils
+finger_Coord = [(8, 6), (12, 10), (16, 14), (20, 18)]
+thumb_Coord = (2,4)
 
-        #define roi which is a small square on screen
+while True:
+    success, image = cap.read()
+    RGB_image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
+    results = hands.process(RGB_image)
+    multiLandMarks = results.multi_hand_landmarks
 
-        #roi=frame[0:640, 0:480]
-        roi = frame
+    if multiLandMarks:
+        handList = []
+        for handLms in multiLandMarks:
+            mpDraw.draw_landmarks(image, handLms, mp_Hands.HAND_CONNECTIONS)
+            for idx, lm in enumerate(handLms.landmark):
+                h, w, c = image.shape
+                cx, cy = int(lm.x * w), int(lm.y * h)
+                handList.append((cx, cy))
+        for point in handList:
+            cv.circle(image, point, 10, (255, 255, 0), cv.FILLED)
+        upCount = 0
+        for coordinate in finger_Coord:
+            if handList[coordinate[0]][1] < handList[coordinate[1]][1]:
+                upCount += 1
+        if handList[thumb_Coord[0]][0] > handList[thumb_Coord[1]][0]:
+            upCount += 1
+        cv.putText(image, str(upCount), (150,150), cv.FONT_HERSHEY_PLAIN, 12, (0,255,0), 12)
+        print(upCount,file=open('status.txt','a',encoding='UTF-8'))
 
-        # cv2.rectangle(frame,(1,1),(640,480),(0,255,0),0)
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    cv.imshow("Counting number of fingers", image)
 
-
-
-    # range of the skin colour is defined
-        lower_skin = np.array([0,20,70], dtype=np.uint8)
-        upper_skin = np.array([20,255,255], dtype=np.uint8)
-
-     #extract skin colur image
-        mask = cv2.inRange(hsv, lower_skin, upper_skin)
-
-
-
-    #extrapolate the hand to fill dark spots within
-        mask = cv2.dilate(mask,kernel,iterations = 4)
-
-    #image is blurred using GBlur
-        mask = cv2.GaussianBlur(mask,(3,3),100)
-
-
-
-    #find contours
-        contours,hierarchy= cv2.findContours(mask,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
-
-   #find contour of max area(hand)
-        cnt = max(contours, key = lambda x: cv2.contourArea(x))
-
-    #approx the contour a little
-        epsilon = 0.0005*cv2.arcLength(cnt,True)
-        approx= cv2.approxPolyDP(cnt,epsilon,True)
-
-
-    #make convex hull around hand
-        hull = cv2.convexHull(cnt)
-
-     #define area of hull and area of hand
-        areahull = cv2.contourArea(hull)
-        areacnt = cv2.contourArea(cnt)
-
-    #find the percentage of area not covered by hand in convex hull
-        arearatio=((areahull-areacnt)/areacnt)*100
-
-     #find the defects in convex hull with respect to hand
-        hull = cv2.convexHull(approx, returnPoints=False)
-        defects = cv2.convexityDefects(approx, hull)
-
-    # l = no. of defects
-        l=0
-
-    #code for finding no. of defects due to fingers
-        for i in range(defects.shape[0]):
-            s,e,f,d = defects[i,0]
-            start = tuple(approx[s][0])
-            end = tuple(approx[e][0])
-            far = tuple(approx[f][0])
-            pt= (100,180)
-
-
-            # find length of all sides of triangle
-            a = math.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
-            b = math.sqrt((far[0] - start[0])**2 + (far[1] - start[1])**2)
-            c = math.sqrt((end[0] - far[0])**2 + (end[1] - far[1])**2)
-            s = (a+b+c)/2
-            ar = math.sqrt(s*(s-a)*(s-b)*(s-c))
-
-            #distance between point and convex hull
-            d=(2*ar)/a
-
-            # apply cosine rule here
-            angle = math.acos((b**2 + c**2 - a**2)/(2*b*c)) * 57
-
-
-            # ignore angles > 90 and ignore points very close to convex hull(they generally come due to noise)
-            if angle <= 90 and d>30:
-                l += 1
-                cv2.circle(roi, far, 3, [255,0,0], -1)
-
-            #draw lines around hand
-            cv2.line(roi,start, end, [0,255,0], 2)
-
-
-        l+=1
-
-        #display corresponding gestures which are in their ranges
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        if l==1:
-            if areacnt<2000:
-                cv2.putText(frame,'Put hand in the box',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
-            else:
-                if arearatio<12:
-                    cv2.putText(frame,'0',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
-                
-                else:
-                    cv2.putText(frame,'1',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
-
-        elif l==2:
-            cv2.putText(frame,'2',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
-
-        elif l==3:
-
-              if arearatio<27:
-                    cv2.putText(frame,'3',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
-              else:
-                    cv2.putText(frame,'ok',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
-
-        elif l==4:
-            cv2.putText(frame,'4',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
-
-        elif l==5:
-            cv2.putText(frame,'5',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
-
-        elif l==6:
-            cv2.putText(frame,'reposition',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
-
-        else :
-            cv2.putText(frame,'reposition',(10,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
-
-        cv2.imshow('mask',mask)
-        cv2.putText(frame, str(cap.get(cv2.CAP_PROP_AUTO_EXPOSURE)), (0,100), font, 2, (0,0,255), 3, cv2.LINE_AA)
-        cv2.putText(frame, str(cap.get(cv2.CAP_PROP_AUTO_WB)), (0,150), font, 2, (0,0,255), 3, cv2.LINE_AA)
-        cv2.putText(frame, str(cap.get(cv2.CAP_PROP_AUTO_WB)), (0,200), font, 2, (0,0,255), 3, cv2.LINE_AA)
-        cv2.imshow('frame',frame)
-    except:
-        cv2.imshow('frame', frame)
-
-
-    k = cv2.waitKey(5) & 0xFF
+    k = cv.waitKey(1) & 0xFF
     if k == 27:
         break
-
-cv2.destroyAllWindows()
-cap.release()
